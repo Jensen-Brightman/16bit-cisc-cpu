@@ -1,0 +1,283 @@
+class Instruction:
+    instruction_list: list[Instruction] = []
+    label_list: list[Line] = []
+
+    def __init__(self, opcode: int, name: str,
+                 arg_types: str, attrs_enb: list[str],
+                 base_size: int) -> None:
+        Instruction._validate_arg_types(arg_types)
+        Instruction._validate_atr_types(attrs_enb)
+
+        self.opcode: int = opcode
+        self.name: str = name.lower()
+        self.arg_types: str = arg_types
+        self.attrs_enb: list[str] = attrs_enb
+        self.base_size: int = base_size
+
+    @staticmethod
+    def _validate_arg_types(arg_types: str) -> None:
+        for c in arg_types:
+            if c in "rpi":
+                continue
+            raise ValueError("[INSTR TYPES] Args types must be 'RPI'")
+
+    @staticmethod
+    def _validate_atr_types(atr_types: list[str]) -> None:
+        for atr in atr_types:
+            if atr in ["byte", "flags", "carry"]:
+                continue
+            raise ValueError(
+                "[INSTR TYPES] Attributes must be byte, flag or carry")
+
+    @staticmethod
+    def _seperate_parameters(args: list[str]) -> tuple[list[str], list[str]]:
+        attr_list: list[str] = []
+        arg_list:  list[str] = []
+        for a in args:
+            if a in ["byte", "flags", "carry"]:
+                attr_list.append(a)
+            else:
+                arg_list.append(a)
+        return attr_list, arg_list
+
+    @staticmethod
+    def tokenize(s: str) -> tuple[str, list[str], list[str]]:
+        name = s.split(" ")[0]
+        parameters = [k for k in s[s.find(" "):].replace(",", " ").split(" ")
+                      if k.replace(" ", "")]
+
+        attributes, arguments = Instruction._seperate_parameters(parameters)
+
+        return name, attributes, arguments
+
+    @staticmethod
+    def is_immediate(s: str) -> bool:
+        if s.isnumeric():
+            return True
+        if s.replace("0b", "").isnumeric():
+            return True
+        try:
+            _ = int(s, 16)
+            return True
+        except:
+            return False
+
+    @staticmethod
+    def check_label_exists(label: str) -> bool:
+        for l in Instruction.label_list:
+            if l.label_argument != label:
+                continue
+            return True
+
+        raise Exception("Label isn't defined")
+
+    @staticmethod
+    def get_label_ln_with_name(label: str) -> Line | None:
+        for l in Instruction.label_list:
+            if l.label_argument != label:
+                continue
+            return l
+        return None
+
+    @staticmethod
+    def extract_arg_type(arg: str) -> str:
+        if arg[0] == "r":
+            return "r"
+        if arg[:2] == "[r" and arg[-1] == "]":
+            return "p"
+        if Instruction.is_immediate(arg) or Instruction.check_label_exists(arg):
+            return "i"
+
+        raise ValueError("Argument type not recognised")
+
+    def compare(self, name: str, attrs: list[str], args: list[str]) -> bool:
+        if name != self.name:
+            return False
+
+        arg_types = "".join([Instruction.extract_arg_type(k) for k in args])
+        if arg_types != self.arg_types:
+            return False
+
+        for a in attrs:
+            if a in self.attrs_enb:
+                continue
+            raise Exception(f"Attribute type '{a}' not valid for {self}")
+
+        return True
+
+    @staticmethod
+    def find_instruction(instr_string: str) -> Instruction | None:
+        tokens = Instruction.tokenize(instr_string)
+        for instr in Instruction.instruction_list:
+            if not instr.compare(*tokens):
+                continue
+            return instr
+
+        if instr_string.replace(" ", "") != "" and instr_string[instr_string.find(":")+1:].replace(" ", "") != "":
+            raise Exception(f"Unrecognised instruction: '{instr_string}'")
+
+        return None
+
+    @staticmethod
+    def immediate_to_int(immediate: str) -> int:
+        negative = immediate[0] == '-'
+        if negative:
+            immediate = immediate[1:]
+        
+        if immediate.isnumeric():
+            return int(immediate) * (-1 if negative else 1)
+        if immediate[:2] == "0b":
+            return int(immediate[2:], 2) * (-1 if negative else 1)
+        if immediate[:2] == "0x":
+            return int(immediate[2:], 16) * (-1 if negative else 1)
+
+    @staticmethod
+    def immediate_creates_offest(immediate: int) -> 0 | 1:
+        if immediate>0:
+            return 1 if immediate>255 else 0
+        return 1 if immediate<-128 else 0
+
+
+    def __repr__(self):
+        return f'{self.opcode}_{self.name}_{self.arg_types}{"_" if self.attrs_enb else ""}{"".join([k[0] for k in self.attrs_enb])}'
+
+
+class Line:
+    def __init__(self, line: str, ln_num: int):
+        self.orginal_string: str = line
+        self.string_content: str = Line._process_string(line)
+        self.line_number: int = ln_num
+        self.related_instr: Instruction = None
+        self.args: list = None
+        self.attributes: list[str] = None
+        self.label_argument: str = None
+
+        self.check_for_labels()
+
+    @staticmethod
+    def _remove_comments(s: str) -> str:
+        return s[:s.find(";")] if ";" in s else s
+
+    @staticmethod
+    def _remove_leading_space(s: str) -> str:
+        if s == "":
+            return s
+        
+        k = 0
+        for i, c in enumerate(s):
+            if c == " ":
+                continue
+            k=i
+            break
+        return s[i:]
+
+    @staticmethod
+    def _process_string(s: str) -> str:
+        s = Line._remove_comments(s)
+        s = Line._remove_leading_space(s)
+        s = s.lower()
+        return s
+
+    @staticmethod
+    def from_source(source: str) -> list[Line]:
+        lns = source.split("\n")
+        return [Line(s, n) for n, s in enumerate(lns)]
+
+    def check_for_labels(self) -> None:
+        if not ":" in self.string_content:
+            return
+
+        label = self.string_content[:self.string_content.find(":")]
+        if " " in label:
+            raise Exception("Labels cannot contain spaces")
+        if label == "":
+            raise Exception("Label is empty")
+        if label[0].isnumeric():
+            raise Exception("Label cannot start with a number")
+
+        self.label_argument = label
+        Instruction.label_list.append(self)
+
+    def evaluate_label_arguments(self, lines: list[Line]) -> None:
+        if not (self.related_instr and "i" in self.related_instr.arg_types): return
+        target_line = Instruction.get_label_ln_with_name(self.args[self.related_instr.arg_types.find("i")])
+        if not target_line: return
+
+        offset_calculated_bytes: int = 0
+
+        if self.line_number > target_line.line_number:
+            for i in range(target_line.line_number+1, self.line_number):
+                offset_calculated_bytes -= lines[i].byte_size()
+
+        if self.line_number < target_line.line_number:
+            for i in range(self.line_number + 1, target_line.line_number):
+                offset_calculated_bytes += lines[i].byte_size()
+
+            ln_base_size = lines[self.line_number].related_instr.base_size
+            minimum_offset = offset_calculated_bytes + ln_base_size
+            if -128<=minimum_offset and minimum_offset<=255:
+                offset_calculated_bytes += ln_base_size
+            else:
+                offset_calculated_bytes += ln_base_size + 1
+
+        self.args[self.related_instr.arg_types.find("i")] = str(offset_calculated_bytes)
+
+    def byte_size(self) -> int:
+        if not self.related_instr:
+            return 0
+        if not "i" in self.related_instr.arg_types:
+            return self.related_instr.base_size
+
+        return self.related_instr.base_size + Instruction.immediate_creates_offest(
+             Instruction.immediate_to_int(self.args[self.related_instr.arg_types.find("i")]) )
+
+    def __repr__(self):
+        label_comment = f' ({self.label_argument})' if self.label_argument else ""
+        try:
+            self_size = self.byte_size()
+        except Exception as e:
+            self_size = "-"
+        
+        if self.related_instr:
+            return f'{self.line_number+1}: {self.orginal_string}  -> ({self.related_instr}) Atrs: {
+                self.attributes}, Args: {self.args}, Size: {self_size}{label_comment}'
+        return f'{self.line_number+1}: {self.orginal_string}{label_comment}'
+
+
+if __name__ == "__main__":
+    Instruction.instruction_list = [
+        Instruction(0, "mov", "rr", ["byte"], 3),
+        Instruction(1, "mov", "ri", [], 4),
+    ]
+
+    source = ""
+    with open("reference.asm", "r") as file:
+        source = file.read()
+
+    line_list = Line.from_source(source)
+    print("[Pass #1]")
+    for ln in line_list:
+        try:
+            ln.related_instr = Instruction.find_instruction(ln.string_content)
+            if ln.related_instr:
+                tokens = Instruction.tokenize(ln.string_content)
+                ln.attributes = tokens[1]
+                ln.args = tokens[2]
+            print(ln)
+
+        except Exception as e:
+            # raise Exception(f"[ln {ln.line_number}] {e}") from None
+            raise Exception(f"[ln {ln.line_number+1}] {e}")
+
+    print("[Pass #2]")
+    for ln in line_list:
+        try:
+            ln.evaluate_label_arguments(line_list)
+            # [TODO]: 
+            # - [x] Make labels work both ways!!!!
+            # - [ ] evaluate other labels on passing
+
+            print(ln)
+        except Exception as e:
+            # raise Exception(f"[ln {ln.line_number}] {e}") from None
+            raise Exception(f"[ln {ln.line_number+1}] {e}")
