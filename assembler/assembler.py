@@ -123,7 +123,7 @@ class Instruction:
         negative = immediate[0] == '-'
         if negative:
             immediate = immediate[1:]
-        
+
         if immediate.isnumeric():
             return int(immediate) * (-1 if negative else 1)
         if immediate[:2] == "0b":
@@ -133,10 +133,9 @@ class Instruction:
 
     @staticmethod
     def immediate_creates_offest(immediate: int) -> 0 | 1:
-        if immediate>0:
-            return 1 if immediate>255 else 0
-        return 1 if immediate<-128 else 0
-
+        if immediate > 0:
+            return 1 if immediate > 255 else 0
+        return 1 if immediate < -128 else 0
 
     def __repr__(self):
         return f'{self.opcode}_{self.name}_{self.arg_types}{"_" if self.attrs_enb else ""}{"".join([k[0] for k in self.attrs_enb])}'
@@ -151,6 +150,7 @@ class Line:
         self.args: list = None
         self.attributes: list[str] = None
         self.label_argument: str = None
+        self.immediate_refernce_size = 1
 
         self.check_for_labels()
 
@@ -162,12 +162,12 @@ class Line:
     def _remove_leading_space(s: str) -> str:
         if s == "":
             return s
-        
+
         k = 0
         for i, c in enumerate(s):
             if c == " ":
                 continue
-            k=i
+            k = i
             break
         return s[i:]
 
@@ -198,10 +198,24 @@ class Line:
         self.label_argument = label
         Instruction.label_list.append(self)
 
-    def evaluate_label_arguments(self, lines: list[Line]) -> None:
-        if not (self.related_instr and "i" in self.related_instr.arg_types): return
-        target_line = Instruction.get_label_ln_with_name(self.args[self.related_instr.arg_types.find("i")])
-        if not target_line: return
+    def get_immediate_index(self) -> int:
+        return self.related_instr.arg_types.find("i")
+
+    def get_immediate_value(self) -> any:
+        return self.args[self.related_instr.arg_types.find("i")]
+
+    def get_referenced_ln(self) -> Line:
+        return Instruction.get_label_ln_with_name(self.get_immediate_value())
+
+    def evaluate_label_arguments(self, lines: list[Line]) -> bool:
+        """
+        Returns if any changes where made to the lines refernce size.
+        """
+        if not (self.related_instr and "i" in self.related_instr.arg_types):
+            return
+        target_line = self.get_referenced_ln()
+        if not target_line:
+            return
 
         offset_calculated_bytes: int = 0
 
@@ -215,12 +229,18 @@ class Line:
 
             ln_base_size = lines[self.line_number].related_instr.base_size
             minimum_offset = offset_calculated_bytes + ln_base_size
-            if -128<=minimum_offset and minimum_offset<=255:
+            if -128 <= minimum_offset and minimum_offset <= 255:
                 offset_calculated_bytes += ln_base_size
             else:
                 offset_calculated_bytes += ln_base_size + 1
 
-        self.args[self.related_instr.arg_types.find("i")] = str(offset_calculated_bytes)
+        self.args[self.get_immediate_index()] = str(offset_calculated_bytes)
+        if self.immediate_refernce_size != 2:
+            self.immediate_refernce_size += Instruction.immediate_creates_offest(
+                offset_calculated_bytes)
+            return self.immediate_refernce_size == 2
+
+        return False
 
     def byte_size(self) -> int:
         if not self.related_instr:
@@ -228,8 +248,11 @@ class Line:
         if not "i" in self.related_instr.arg_types:
             return self.related_instr.base_size
 
-        return self.related_instr.base_size + Instruction.immediate_creates_offest(
-             Instruction.immediate_to_int(self.args[self.related_instr.arg_types.find("i")]) )
+        if self.get_referenced_ln():
+            return self.related_instr.base_size + self.immediate_refernce_size - 1
+        else:
+            return self.related_instr.base_size + Instruction.immediate_creates_offest(
+                Instruction.immediate_to_int(self.get_immediate_value()))
 
     def __repr__(self):
         label_comment = f' ({self.label_argument})' if self.label_argument else ""
@@ -237,7 +260,7 @@ class Line:
             self_size = self.byte_size()
         except Exception as e:
             self_size = "-"
-        
+
         if self.related_instr:
             return f'{self.line_number+1}: {self.orginal_string}  -> ({self.related_instr}) Atrs: {
                 self.attributes}, Args: {self.args}, Size: {self_size}{label_comment}'
@@ -270,14 +293,16 @@ if __name__ == "__main__":
             raise Exception(f"[ln {ln.line_number+1}] {e}")
 
     print("[Pass #2]")
-    for ln in line_list:
+    i: int = 0
+    while i < len(line_list):
         try:
-            ln.evaluate_label_arguments(line_list)
-            # [TODO]: 
-            # - [x] Make labels work both ways!!!!
-            # - [ ] evaluate other labels on passing
-
+            ln = line_list[i]
+            ref_upd = ln.evaluate_label_arguments(line_list)
             print(ln)
+            if ref_upd:
+                i = 0
+                continue
+            i += 1
         except Exception as e:
             # raise Exception(f"[ln {ln.line_number}] {e}") from None
             raise Exception(f"[ln {ln.line_number+1}] {e}")
