@@ -2,13 +2,14 @@ class Instruction:
     instruction_list: list[Instruction] = []
     label_list: list[Line] = []
 
-    def __init__(self, opcode: int, name: str,
+    def __init__(self, opcode: int, full_name: str, name: str,
                  arg_types: str, attrs_enb: list[str],
                  base_size: int) -> None:
         Instruction._validate_arg_types(arg_types)
         Instruction._validate_atr_types(attrs_enb)
 
         self.opcode: int = opcode
+        self.full_name = full_name
         self.name: str = name.lower()
         self.arg_types: str = arg_types
         self.attrs_enb: list[str] = attrs_enb
@@ -43,8 +44,17 @@ class Instruction:
     @staticmethod
     def tokenize(s: str) -> tuple[str, list[str], list[str]]:
         name = s.split(" ")[0]
-        parameters = [k for k in s[s.find(" "):].replace(",", " ").split(" ")
+        og_parameters = [k for k in s[s.find(" "):].replace(",", " ").split(" ")
                       if k.replace(" ", "")]
+
+        parameters: list[str] = []
+        for param in og_parameters:
+            if "+" in param and param[0] != "+":
+                parameters += [k.strip() for k in param.split("+") if k.replace(" ", "") != ""]
+            elif "-" in param and param[0] != "-":
+                parameters += [k.strip() for k in param.split("-") if k.replace(" ", "") != ""]
+            elif param.strip() != "+" and param.strip() != "-":
+                parameters.append(param.strip())
 
         attributes, arguments = Instruction._seperate_parameters(parameters)
 
@@ -85,6 +95,10 @@ class Instruction:
             return "r"
         if arg[:2] == "[r" and arg[-1] == "]":
             return "p"
+        if arg[:2] == "[r":
+            return "p"
+        if arg[-1] == "]":
+            return "i"
         if Instruction.is_immediate(arg) or Instruction.check_label_exists(arg):
             return "i"
 
@@ -108,6 +122,7 @@ class Instruction:
     @staticmethod
     def find_instruction(instr_string: str) -> Instruction | None:
         tokens = Instruction.tokenize(instr_string)
+        print(tokens)
         for instr in Instruction.instruction_list:
             if not instr.compare(*tokens):
                 continue
@@ -120,6 +135,9 @@ class Instruction:
 
     @staticmethod
     def immediate_to_int(immediate: str) -> int:
+        if immediate[-1] == "]":
+            immediate = immediate[:-1]
+
         negative = immediate[0] == '-'
         if negative:
             immediate = immediate[1:]
@@ -138,7 +156,7 @@ class Instruction:
         return 1 if immediate < -128 else 0
 
     def __repr__(self):
-        return f'{self.opcode}_{self.name}_{self.arg_types}{"_" if self.attrs_enb else ""}{"".join([k[0] for k in self.attrs_enb])}'
+        return f'{self.opcode}_{self.full_name}_{self.arg_types}{"_" if self.attrs_enb else ""}{"".join([k[0] for k in self.attrs_enb])}'
 
 
 class Line:
@@ -269,12 +287,65 @@ class Line:
 
 if __name__ == "__main__":
     Instruction.instruction_list = [
-        Instruction(0, "mov", "rr", ["byte"], 3),
-        Instruction(1, "mov", "ri", [], 4),
+        # Memory/Registers
+        Instruction(0, "OP_MOV_REG", "mov", "rr", ["byte"], 3),
+        Instruction(1, "OP_MOV_IMM", "mov", "ri", [], 4),
+        Instruction(2, "OP_LOAD", "mov", "rp", ["byte"], 3),
+        Instruction(3, "OP_LOAD_IDX", "mov", "rpi", ["byte"], 4),
+        Instruction(4, "OP_STORE", "mov", "pr", ["byte"], 3),
+        Instruction(5, "OP_STORE_IDX", "mov", "pir", ["byte"], 4),
+        Instruction(6, "OP_MEM2MEM", "mov", "pp", ["byte"], 3),
+        Instruction(7, "OP_MEM2MEM_IDX", "mov", "ppi", ["byte"], 4),
+
+        # Control Registers
+        Instruction(8, "OP_MTC", "mtc", "rr", [], 2),
+        Instruction(9, "OP_MFC", "mfc", "rr", [], 2),
+
+        # Arithmetic/Logic
+        Instruction(10, "OP_ADD", "add", "rrr", ["flags", "carry"], 4),
+        Instruction(11, "OP_ADD_IMM", "add", "rri", ["flags", "carry"], 4),
+        Instruction(12, "OP_SUB", "sub", "rrr", ["flags", "carry"], 4),
+        Instruction(13, "OP_SUB_IMM", "sub", "rri", ["flags", "carry"], 4),
+        Instruction(14, "OP_AND", "and", "rrr", ["flags"], 4),
+        Instruction(15, "OP_AND", "and", "rri", ["flags"], 4),
+        Instruction(16, "OP_OR", "or", "rrr", ["flags"], 4),
+        Instruction(17, "OP_OR_IMM", "or", "rri", ["flags"], 4),
+        Instruction(18, "OP_NOT", "not", "rr", ["flags"], 3),
+        Instruction(19, "OP_LSR", "lsr", "ri", ["flags"], 4),
+        Instruction(20, "OP_LSL", "lsl", "ri", ["flags"], 4),
+        Instruction(21, "OP_CMP", "cmp", "rr", [], 2),
+        Instruction(22, "OP_CMP_IMM", "cmp", "ri", [], 4),
+
+        # Interupts
+        Instruction(23, "OP_SYS", "sys", "", [], 1),
+        Instruction(24, "OP_ERET", "eret", "", [], 1),
+        Instruction(25, "OP_CLI", "cli", "", [], 1),
+        Instruction(26, "OP_STI", "sti", "", [], 1),
+
+        # MMU
+        Instruction(27, "OP_MMU_ON", "mmuon", "", [], 1),
+        Instruction(28, "OP_MMU_OFF", "mmuoff", "", [], 1),
+        Instruction(29, "OP_MMU_PTE", "pte", "rr", [], 2),
+        Instruction(30, "OP_MMU_FLUSH", "mfl", "", [], 1),
+
+        # Branching
+        Instruction(31, "OP_BRANCH", "b", "r", [], 2),
+        Instruction(32, "OP_BRANCH_IMM", "b", "i", [], 3),
+        Instruction(33, "OP_BEQ_IMM", "beq", "i", [], 3),
+        Instruction(34, "OP_BNE_IMM", "bne", "i", [], 3),
+        Instruction(35, "OP_BLT_IMM", "blt", "i", [], 3),
+        Instruction(36, "OP_BGT_IMM", "bgt", "i", [], 3),
+
+        # Stack
+        Instruction(37, "OP_PUSH", "push", "r", [], 2),
+        Instruction(38, "OP_POP", "pop", "r", [], 2),
+        Instruction(39, "OP_CALL", "call", "r", [], 2),
+        Instruction(40, "OP_CALL_IMM", "call", "i", [], 3),
+        Instruction(41, "OP_RET", "ret", "", [], 2),
     ]
 
     source = ""
-    with open("reference.asm", "r") as file:
+    with open(".local\\comprehensive_test.asm", "r") as file:
         source = file.read()
 
     line_list = Line.from_source(source)
