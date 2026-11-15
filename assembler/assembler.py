@@ -1,3 +1,6 @@
+import struct
+
+
 class Instruction:
     instruction_list: list[Instruction] = []
     label_list: list[Line] = []
@@ -45,14 +48,16 @@ class Instruction:
     def tokenize(s: str) -> tuple[str, list[str], list[str]]:
         name = s.split(" ")[0]
         og_parameters = [k for k in s[s.find(" "):].replace(",", " ").split(" ")
-                      if k.replace(" ", "")]
+                         if k.replace(" ", "")]
 
         parameters: list[str] = []
         for param in og_parameters:
             if "+" in param and param[0] != "+":
-                parameters += [k.strip() for k in param.split("+") if k.replace(" ", "") != ""]
+                parameters += [k.strip() for k in param.split("+")
+                               if k.replace(" ", "") != ""]
             elif "-" in param and param[0] != "-":
-                parameters += [k.strip() for k in param.split("-") if k.replace(" ", "") != ""]
+                parameters += [k.strip() for k in param.split("-")
+                               if k.replace(" ", "") != ""]
             elif param.strip() != "+" and param.strip() != "-":
                 parameters.append(param.strip())
 
@@ -151,9 +156,15 @@ class Instruction:
 
     @staticmethod
     def immediate_creates_offest(immediate: int) -> 0 | 1:
-        if immediate > 0:
+        if immediate >= 0:
             return 1 if immediate > 255 else 0
         return 1 if immediate < -128 else 0
+
+    @staticmethod
+    def immediate_requires_word(immediate: int) -> bool:
+        if immediate >= 0:
+            return True if immediate > 255 else False
+        return True if immediate < -128 else False
 
     def __repr__(self):
         return f'{self.opcode}_{self.full_name}_{self.arg_types}{"_" if self.attrs_enb else ""}{"".join([k[0] for k in self.attrs_enb])}'
@@ -272,6 +283,66 @@ class Line:
             return self.related_instr.base_size + Instruction.immediate_creates_offest(
                 Instruction.immediate_to_int(self.get_immediate_value()))
 
+    def generate_binary(self) -> bytearray:
+        if not self.related_instr:
+            return
+
+        binary: bytearray = bytearray()
+
+        imm = None
+        if "i" in self.related_instr.arg_types:
+            imm = Instruction.immediate_to_int(
+                self.get_immediate_value().replace("]", "").strip())
+
+        # Opcode
+        binary.extend(struct.pack("<B", self.related_instr.opcode))
+
+        # Attributes
+        a0 = "byte" in self.attributes or "flags" in self.attributes  # means byte or flags
+        a1 = "carry" in self.attributes  # update use carry
+        a2 = True if (imm != None and imm < 0) else False
+        a3 = (not Instruction.immediate_requires_word(
+            imm)) if imm != None else False
+
+        packed_attributes = (int(a3) << 3) | (
+            int(a2) << 2) | (int(a1) << 1) | int(a0)
+
+        if not(self.related_instr.attrs_enb == [] and imm==None):
+            binary.extend(struct.pack("<B", packed_attributes))
+
+        # Registers
+        registers = []
+        for a in self.args:
+            if not (a[0] == "r" or a[:2] == "[r"):
+                continue
+            a = a.replace("[", "").replace("]", "").replace("r", "").strip()
+            registers.append(Instruction.immediate_to_int(a))
+
+        match self.related_instr.arg_types.count("r") + self.related_instr.arg_types.count("p"):
+            case 1:
+                binary.extend(struct.pack("<B", registers[0]))
+
+            case 2:
+                combined_byte = (registers[0] << 4) | registers[1]
+                binary.extend(struct.pack("<B", combined_byte))
+
+            case 3:
+                combined_byte = (registers[0] << 4) | registers[1]
+                binary.extend(struct.pack("<B", combined_byte))
+                binary.extend(struct.pack("<B", registers[2]))
+
+        # Immediates
+        if imm != None:
+            if Instruction.immediate_requires_word(imm):
+                binary.extend(struct.pack("<H" if imm >= 0 else "<h", imm))
+            else:
+                binary.extend(struct.pack("<B" if imm >= 0 else "<b", imm))
+
+        print(f"{self.line_number+1}: " +
+              " ".join([f"{b:02X}" for b in binary]))
+
+        return binary
+
     def __repr__(self):
         label_comment = f' ({self.label_argument})' if self.label_argument else ""
         try:
@@ -341,7 +412,7 @@ if __name__ == "__main__":
         Instruction(38, "OP_POP", "pop", "r", [], 2),
         Instruction(39, "OP_CALL", "call", "r", [], 2),
         Instruction(40, "OP_CALL_IMM", "call", "i", [], 3),
-        Instruction(41, "OP_RET", "ret", "", [], 2),
+        Instruction(41, "OP_RET", "ret", "", [], 1),
     ]
 
     source = ""
@@ -377,3 +448,11 @@ if __name__ == "__main__":
         except Exception as e:
             # raise Exception(f"[ln {ln.line_number}] {e}") from None
             raise Exception(f"[ln {ln.line_number+1}] {e}")
+
+    binary_result: bytearray = bytearray()
+    for ln in line_list:
+        if (n := ln.generate_binary()):
+            binary_result += n
+
+    with open(".local\\result.bin", "wb") as file:
+        file.write(binary_result)
