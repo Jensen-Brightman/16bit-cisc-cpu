@@ -174,6 +174,7 @@ class Line:
     def __init__(self, line: str, ln_num: int):
         self.orginal_string: str = line
         self.string_content: str = Line._process_string(line)
+        self.raw_bytes: bytearray = None
         self.line_number: int = ln_num
         self.related_instr: Instruction = None
         self.args: list = None
@@ -227,6 +228,30 @@ class Line:
         self.label_argument = label
         Instruction.label_list.append(self)
 
+    def check_for_directives(self) -> bool:
+        if self.string_content == "" or self.string_content[0] != ".":
+            return False
+
+        print(self.string_content)
+        parts = self.string_content.split(None, 1)
+        directive = parts[0]
+        arg_str = parts[1].strip() if len(parts) > 1 else ""
+        self.raw_bytes = bytearray()
+
+        if directive == ".byte":
+            for a in arg_str.split(","):
+                num = Instruction.immediate_to_int(a.strip())
+                self.raw_bytes.extend(struct.pack("<B" if num >= 0 else "<b", num))
+        elif directive == ".word":
+            for a in arg_str.split(","):
+                num = Instruction.immediate_to_int(a.strip())
+                self.raw_bytes.extend(struct.pack("<H" if num >= 0 else "<h", num))
+
+        else:
+            raise Exception(f"Unknown directive '{directive}'")
+
+        return True
+
     def get_immediate_index(self) -> int:
         return self.related_instr.arg_types.find("i")
 
@@ -272,6 +297,8 @@ class Line:
         return False
 
     def byte_size(self) -> int:
+        if self.raw_bytes != None:
+            return len(self.raw_bytes)
         if not self.related_instr:
             return 0
         if not "i" in self.related_instr.arg_types:
@@ -284,6 +311,10 @@ class Line:
                 Instruction.immediate_to_int(self.get_immediate_value()))
 
     def generate_binary(self) -> bytearray:
+        if self.raw_bytes != None:
+            print(f"{self.line_number+1}: " + " ".join([f"{b:02X}" for b in self.raw_bytes]))
+            return self.raw_bytes
+
         if not self.related_instr:
             return
 
@@ -307,7 +338,7 @@ class Line:
         packed_attributes = (int(a3) << 3) | (
             int(a2) << 2) | (int(a1) << 1) | int(a0)
 
-        if not(self.related_instr.attrs_enb == [] and imm==None):
+        if not (self.related_instr.attrs_enb == [] and imm == None):
             binary.extend(struct.pack("<B", packed_attributes))
 
         # Registers
@@ -340,6 +371,10 @@ class Line:
 
         print(f"{self.line_number+1}: " +
               " ".join([f"{b:02X}" for b in binary]))
+
+        if len(binary) != self.byte_size():
+            raise Exception(
+                "Error generating binary: generated binary doesn't math instruction length")
 
         return binary
 
@@ -416,13 +451,17 @@ if __name__ == "__main__":
     ]
 
     source = ""
-    with open(".local\\comprehensive_test.asm", "r") as file:
+    with open(".local\\directives_test.asm", "r") as file:
         source = file.read()
 
     line_list = Line.from_source(source)
     print("[Pass #1]")
     for ln in line_list:
         try:
+            if ln.check_for_directives():
+                print(ln)
+                continue
+
             ln.related_instr = Instruction.find_instruction(ln.string_content)
             if ln.related_instr:
                 tokens = Instruction.tokenize(ln.string_content)
