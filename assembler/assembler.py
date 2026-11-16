@@ -47,7 +47,8 @@ class Instruction:
     @staticmethod
     def tokenize(s: str) -> tuple[str, list[str], list[str]]:
         name = s.split(" ")[0]
-        og_parameters = [k for k in s[s.find(" "):].replace(",", " ").split(" ")
+        text_after_name = s[s.find(" "):] if s.find(" ") > -1 else ""
+        og_parameters = [k for k in text_after_name.replace(",", " ").split(" ")
                          if k.replace(" ", "")]
 
         parameters: list[str] = []
@@ -241,11 +242,13 @@ class Line:
         if directive == ".byte":
             for a in arg_str.split(","):
                 num = Instruction.immediate_to_int(a.strip())
-                self.raw_bytes.extend(struct.pack("<B" if num >= 0 else "<b", num))
+                self.raw_bytes.extend(struct.pack(
+                    "<B" if num >= 0 else "<b", num))
         elif directive == ".word":
             for a in arg_str.split(","):
                 num = Instruction.immediate_to_int(a.strip())
-                self.raw_bytes.extend(struct.pack("<H" if num >= 0 else "<h", num))
+                self.raw_bytes.extend(struct.pack(
+                    "<H" if num >= 0 else "<h", num))
 
         else:
             raise Exception(f"Unknown directive '{directive}'")
@@ -312,7 +315,8 @@ class Line:
 
     def generate_binary(self) -> bytearray:
         if self.raw_bytes != None:
-            print(f"{self.line_number+1}: " + " ".join([f"{b:02X}" for b in self.raw_bytes]))
+            print(f"{self.line_number+1}: " +
+                  " ".join([f"{b:02X}" for b in self.raw_bytes]))
             return self.raw_bytes
 
         if not self.related_instr:
