@@ -1,4 +1,7 @@
+import argparse
+import os
 import struct
+import sys
 
 
 class Instruction:
@@ -128,7 +131,6 @@ class Instruction:
     @staticmethod
     def find_instruction(instr_string: str) -> Instruction | None:
         tokens = Instruction.tokenize(instr_string)
-        print(tokens)
         for instr in Instruction.instruction_list:
             if not instr.compare(*tokens):
                 continue
@@ -233,7 +235,6 @@ class Line:
         if self.string_content == "" or self.string_content[0] != ".":
             return False
 
-        print(self.string_content)
         parts = self.string_content.split(None, 1)
         directive = parts[0]
         arg_str = parts[1].strip() if len(parts) > 1 else ""
@@ -313,10 +314,11 @@ class Line:
             return self.related_instr.base_size + Instruction.immediate_creates_offest(
                 Instruction.immediate_to_int(self.get_immediate_value()))
 
-    def generate_binary(self) -> bytearray:
+    def generate_binary(self, verbose: bool) -> bytearray:
         if self.raw_bytes != None:
-            print(f"{self.line_number+1}: " +
-                  " ".join([f"{b:02X}" for b in self.raw_bytes]))
+            if verbose:
+                print(f"{self.line_number+1}: " +
+                      " ".join([f"{b:02X}" for b in self.raw_bytes]))
             return self.raw_bytes
 
         if not self.related_instr:
@@ -373,8 +375,9 @@ class Line:
             else:
                 binary.extend(struct.pack("<B" if imm >= 0 else "<b", imm))
 
-        print(f"{self.line_number+1}: " +
-              " ".join([f"{b:02X}" for b in binary]))
+        if verbose:
+            print(f"{self.line_number+1}: " +
+                  " ".join([f"{b:02X}" for b in binary]))
 
         if len(binary) != self.byte_size():
             raise Exception(
@@ -454,16 +457,37 @@ if __name__ == "__main__":
         Instruction(41, "OP_RET", "ret", "", [], 1),
     ]
 
+    parser = argparse.ArgumentParser(
+        description="Assembler for custom 16-bit 'CISC' CPU")
+    parser.add_argument("input", help="Path to the input .asm source file")
+    parser.add_argument(
+        "-o", "--output",
+        default="result.bin",
+        help="Path for the output binary file (default: result.bin)"
+    )
+    parser.add_argument(
+        "-v", "--verbose",
+        action="store_true",
+        help="Print Pass 1 and Pass 2 debug output"
+    )
+    args = parser.parse_args()
+
+    if not os.path.exists(args.input):
+        print(f"Error: Input file '{args.input}' not found.", file=sys.stderr)
+        sys.exit(1)
+
     source = ""
-    with open(".local\\directives_test.asm", "r") as file:
+    with open(args.input, "r") as file:
         source = file.read()
 
     line_list = Line.from_source(source)
-    print("[Pass #1]")
+    if args.verbose:
+        print("[Pass #1]")
     for ln in line_list:
         try:
             if ln.check_for_directives():
-                print(ln)
+                if args.verbose:
+                    print(ln)
                 continue
 
             ln.related_instr = Instruction.find_instruction(ln.string_content)
@@ -471,19 +495,21 @@ if __name__ == "__main__":
                 tokens = Instruction.tokenize(ln.string_content)
                 ln.attributes = tokens[1]
                 ln.args = tokens[2]
-            print(ln)
+
+            if args.verbose:
+                print(ln)
 
         except Exception as e:
             # raise Exception(f"[ln {ln.line_number}] {e}") from None
             raise Exception(f"[ln {ln.line_number+1}] {e}")
 
-    print("[Pass #2]")
+    if args.verbose:
+        print("[Pass #2]")
     i: int = 0
     while i < len(line_list):
         try:
             ln = line_list[i]
             ref_upd = ln.evaluate_label_arguments(line_list)
-            print(ln)
             if ref_upd:
                 i = 0
                 continue
@@ -494,8 +520,10 @@ if __name__ == "__main__":
 
     binary_result: bytearray = bytearray()
     for ln in line_list:
-        if (n := ln.generate_binary()):
+        if (n := ln.generate_binary(args.verbose)):
             binary_result += n
 
-    with open(".local\\result.bin", "wb") as file:
+    with open(args.output, "wb") as file:
         file.write(binary_result)
+
+    print(f"Success: Assembled {len(binary_result)} bytes to '{args.output}'")
