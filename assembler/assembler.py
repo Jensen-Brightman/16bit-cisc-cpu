@@ -314,7 +314,6 @@ class Line:
             if start_line.line_number < target_line.line_number:
                 for i in range(start_line.line_number + 1, target_line.line_number):
                     offset_calculated_bytes += lines[i].byte_size()
-                    print(f"{i+1}: {lines[i].byte_size()} {self}")
 
                 offset_calculated_bytes += Instruction.org
 
@@ -554,7 +553,6 @@ if __name__ == "__main__":
             ref_upd = ln.evaluate_label_arguments(line_list)
             if ref_upd:
                 i = 0
-                print(f"restarted: {ln}")
                 continue
             i += 1
         except Exception as e:
