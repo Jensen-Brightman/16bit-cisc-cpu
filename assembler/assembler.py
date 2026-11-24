@@ -7,10 +7,11 @@ import sys
 class Instruction:
     instruction_list: list[Instruction] = []
     label_list: list[Line] = []
+    org: int = 0
 
     def __init__(self, opcode: int, full_name: str, name: str,
                  arg_types: str, attrs_enb: list[str],
-                 base_size: int) -> None:
+                 base_size: int, uses_relative_referencing: bool = False) -> None:
         Instruction._validate_arg_types(arg_types)
         Instruction._validate_atr_types(attrs_enb)
 
@@ -20,6 +21,7 @@ class Instruction:
         self.arg_types: str = arg_types
         self.attrs_enb: list[str] = attrs_enb
         self.base_size: int = base_size
+        self.uses_relative_referencing: bool = uses_relative_referencing
 
     @staticmethod
     def _validate_arg_types(arg_types: str) -> None:
@@ -55,15 +57,26 @@ class Instruction:
                          if k.replace(" ", "")]
 
         parameters: list[str] = []
+        carry_negative = False
         for param in og_parameters:
             if "+" in param and param[0] != "+":
                 parameters += [k.strip() for k in param.split("+")
                                if k.replace(" ", "") != ""]
             elif "-" in param and param[0] != "-":
-                parameters += [k.strip() for k in param.split("-")
-                               if k.replace(" ", "") != ""]
+                for i, k in enumerate(param.split("-")):
+                    if k.replace(" ", "") == "":
+                        continue
+                    if i == 1:
+                        parameters.append("-"+k.strip())
+                    else:
+                        parameters.append(k.strip())
             elif param.strip() != "+" and param.strip() != "-":
-                parameters.append(param.strip())
+                if carry_negative:
+                    parameters.append("-"+param.strip())
+                else:
+                    parameters.append(param.strip())
+            elif param.strip() == "-":
+                carry_negative = True
 
         attributes, arguments = Instruction._seperate_parameters(parameters)
 
@@ -183,6 +196,7 @@ class Line:
         self.args: list = None
         self.attributes: list[str] = None
         self.label_argument: str = None
+        self.label_reference: Line = None
         self.immediate_refernce_size = 1
 
         self.check_for_labels()
@@ -216,6 +230,13 @@ class Line:
         lns = source.split("\n")
         return [Line(s, n) for n, s in enumerate(lns)]
 
+    def check_for_references(self) -> None:
+        reference = self.get_immediate_value()
+        if (not reference) or Instruction.is_immediate(reference):
+            return
+
+        self.label_reference = Instruction.get_label_ln_with_name(reference)
+        
     def check_for_labels(self) -> None:
         if not ":" in self.string_content:
             return
@@ -250,6 +271,11 @@ class Line:
                 num = Instruction.immediate_to_int(a.strip())
                 self.raw_bytes.extend(struct.pack(
                     "<H" if num >= 0 else "<h", num))
+        elif directive == ".org":
+            if Instruction.is_immediate(arg_str) or Instruction.org != 0:
+                Instruction.org = Instruction.immediate_to_int(arg_str)
+            else:
+                raise Exception(".org directive malformed, or used more than once")
 
         else:
             raise Exception(f"Unknown directive '{directive}'")
@@ -263,34 +289,48 @@ class Line:
         return self.args[self.related_instr.arg_types.find("i")]
 
     def get_referenced_ln(self) -> Line:
-        return Instruction.get_label_ln_with_name(self.get_immediate_value())
+        return self.label_reference
+        # return Instruction.get_label_ln_with_name(self.get_immediate_value())
 
     def evaluate_label_arguments(self, lines: list[Line]) -> bool:
         """
         Returns if any changes where made to the lines refernce size.
         """
         if not (self.related_instr and "i" in self.related_instr.arg_types):
-            return
+            return        
+
         target_line = self.get_referenced_ln()
         if not target_line:
             return
 
         offset_calculated_bytes: int = 0
 
-        if self.line_number > target_line.line_number:
-            for i in range(target_line.line_number+1, self.line_number):
-                offset_calculated_bytes -= lines[i].byte_size()
+        if self.related_instr.uses_relative_referencing:
+            start_line = self
+            if start_line.line_number > target_line.line_number:
+                for i in range(target_line.line_number + 1, start_line.line_number):
+                    offset_calculated_bytes -= lines[i].byte_size()
 
-        if self.line_number < target_line.line_number:
-            for i in range(self.line_number + 1, target_line.line_number):
-                offset_calculated_bytes += lines[i].byte_size()
+            if start_line.line_number < target_line.line_number:
+                for i in range(start_line.line_number + 1, target_line.line_number):
+                    offset_calculated_bytes += lines[i].byte_size()
+                    print(f"{i+1}: {lines[i].byte_size()} {self}")
 
-            ln_base_size = lines[self.line_number].related_instr.base_size
-            minimum_offset = offset_calculated_bytes + ln_base_size
-            if -128 <= minimum_offset and minimum_offset <= 255:
-                offset_calculated_bytes += ln_base_size
-            else:
-                offset_calculated_bytes += ln_base_size + 1
+                offset_calculated_bytes += Instruction.org
+
+                if start_line.related_instr:
+                    ln_base_size = start_line.related_instr.base_size
+                else:
+                    ln_base_size = 0
+
+                minimum_offset = offset_calculated_bytes + ln_base_size
+                if -128 <= minimum_offset and minimum_offset <= 255:
+                    offset_calculated_bytes += ln_base_size
+                else:
+                    offset_calculated_bytes += ln_base_size + 1
+        else:
+            offset_calculated_bytes = Instruction.org + sum(
+                line.byte_size() for line in lines[:target_line.line_number])
 
         self.args[self.get_immediate_index()] = str(offset_calculated_bytes)
         if self.immediate_refernce_size != 2:
@@ -387,6 +427,7 @@ class Line:
 
     def __repr__(self):
         label_comment = f' ({self.label_argument})' if self.label_argument else ""
+        reference_comment = f' (ref. ln {self.label_reference.line_number+1})' if self.label_reference else ""
         try:
             self_size = self.byte_size()
         except Exception as e:
@@ -394,7 +435,7 @@ class Line:
 
         if self.related_instr:
             return f'{self.line_number+1}: {self.orginal_string}  -> ({self.related_instr}) Atrs: {
-                self.attributes}, Args: {self.args}, Size: {self_size}{label_comment}'
+                self.attributes}, Args: {self.args}, Size: {self_size}{label_comment}{reference_comment}'
         return f'{self.line_number+1}: {self.orginal_string}{label_comment}'
 
 
@@ -443,11 +484,11 @@ if __name__ == "__main__":
 
         # Branching
         Instruction(31, "OP_BRANCH", "b", "r", [], 2),
-        Instruction(32, "OP_BRANCH_IMM", "b", "i", [], 3),
-        Instruction(33, "OP_BEQ_IMM", "beq", "i", [], 3),
-        Instruction(34, "OP_BNE_IMM", "bne", "i", [], 3),
-        Instruction(35, "OP_BLT_IMM", "blt", "i", [], 3),
-        Instruction(36, "OP_BGT_IMM", "bgt", "i", [], 3),
+        Instruction(32, "OP_BRANCH_IMM", "b", "i", [], 3, True),
+        Instruction(33, "OP_BEQ_IMM", "beq", "i", [], 3, True),
+        Instruction(34, "OP_BNE_IMM", "bne", "i", [], 3, True),
+        Instruction(35, "OP_BLT_IMM", "blt", "i", [], 3, True),
+        Instruction(36, "OP_BGT_IMM", "bgt", "i", [], 3, True),
 
         # Stack
         Instruction(37, "OP_PUSH", "push", "r", [], 2),
@@ -495,6 +536,7 @@ if __name__ == "__main__":
                 tokens = Instruction.tokenize(ln.string_content)
                 ln.attributes = tokens[1]
                 ln.args = tokens[2]
+                ln.check_for_references()
 
             if args.verbose:
                 print(ln)
@@ -512,6 +554,7 @@ if __name__ == "__main__":
             ref_upd = ln.evaluate_label_arguments(line_list)
             if ref_upd:
                 i = 0
+                print(f"restarted: {ln}")
                 continue
             i += 1
         except Exception as e:
