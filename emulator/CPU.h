@@ -6,7 +6,7 @@
 typedef struct {
 	int16_t registers[16]; // R0-R11, LR, FP, SP, PC
 	int16_t mmu_tlb[16];   // translation lookaside buffer
-	int8_t flags;
+	bool flags[4];
 	int16_t control_registers[5];
 
 	// Control
@@ -36,6 +36,12 @@ typedef struct {
 #define LR 12
 #define SP 14
 #define PC 15
+
+// Flags
+#define F_Z 0 // Zero
+#define F_N 1 // Negative
+#define F_C 2 // Carry
+#define F_V 3 // Overflow
 
 // General Values
 #define VAL_PROG_MEM_SIZE 0xffff

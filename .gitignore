@@ -53,3 +53,24 @@ dkms.conf
 
 # debug information files
 *.dwo
+
+# Visual Studio Specific Additions
+*.suo
+*.user
+*.userosversion
+*.sln.docstates
+
+.vs/
+
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+[Bb]in/
+[Oo]bj/
+ipch/
+
+*.tlog/
+*.lastcodeanalysissucceeded
+*.testsettings
+*.vsmdi

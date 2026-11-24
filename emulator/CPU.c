@@ -125,8 +125,8 @@ void cpu_cycle(CPU_state* cpu) {
 		uint8_t register_a = register_args >> 4;
 		uint8_t register_b = register_args & 0x0f;
 
-		
-		int16_t index = 0;		
+
+		int16_t index = 0;
 
 		if (check_attr_a3(attributes)) { // Immediate byte attribute
 			if (check_attr_a2(attributes)) { // Immediate sign extension attribute
@@ -166,7 +166,7 @@ void cpu_cycle(CPU_state* cpu) {
 		}
 		else {
 			memory_write(cpu, data_location, cpu->registers[register_b]);
-			memory_write(cpu, data_location+1, cpu->registers[register_b]>>8);
+			memory_write(cpu, data_location + 1, cpu->registers[register_b] >> 8);
 		}
 
 		instruction_size = 3;
@@ -202,9 +202,9 @@ void cpu_cycle(CPU_state* cpu) {
 		if (check_attr_a0(attributes)) {
 			memory_write(cpu, data_location, cpu->registers[register_b]);
 		}
-		else {			
+		else {
 			memory_write(cpu, data_location, cpu->registers[register_b]);
-			memory_write(cpu, data_location+1, cpu->registers[register_b]>>8);
+			memory_write(cpu, data_location + 1, cpu->registers[register_b] >> 8);
 		}
 
 		break;
@@ -222,10 +222,491 @@ void cpu_cycle(CPU_state* cpu) {
 		}
 		else {
 			memory_write(cpu, destination, memory_read(cpu, source));
-			memory_write(cpu, destination+1, memory_read(cpu, source)>>8);
+			memory_write(cpu, destination + 1, memory_read(cpu, source + 1));
 		}
 
 		instruction_size = 3;
+
+		break;
+	}
+	case 7: { // OP_MEM2MEM_IDX
+		uint8_t attributes = memory_read(cpu, (uint16_t)(cpu->registers[PC] + 1));
+		uint8_t register_args = memory_read(cpu, (uint16_t)(cpu->registers[PC] + 2));
+		uint8_t register_a = register_args >> 4;
+		uint8_t register_b = register_args & 0x0f;
+
+		int16_t index = 0;
+
+		if (check_attr_a3(attributes)) { // Immediate byte attribute
+			if (check_attr_a2(attributes)) { // Immediate sign extension attribute
+				index = (int16_t)memory_read(cpu, (uint16_t)(cpu->registers[PC] + 3));
+			}
+			else {
+				index = (int16_t)memory_read(cpu, (uint16_t)(cpu->registers[PC] + 3)) & 0x00ff;
+			}
+
+			instruction_size = 4;
+		}
+		else { // Immediate is word
+			index = ((int16_t)memory_read(cpu, (uint16_t)(cpu->registers[PC] + 3)) & 0x00ff) | (((int16_t)memory_read(cpu, (uint16_t)(cpu->registers[PC] + 4)) & 0x00ff) << 8);
+			instruction_size = 5;
+		}
+
+		uint16_t destination = cpu->registers[register_a];
+		int16_t source = cpu->registers[register_b] + index;
+		if (check_attr_a0(attributes)) {
+			memory_write(cpu, destination, memory_read(cpu, source));
+		}
+		else {
+			memory_write(cpu, destination, memory_read(cpu, source));
+			memory_write(cpu, destination + 1, memory_read(cpu, source + 1));
+		}
+
+		break;
+	}
+	case 10: { // OP_ADD
+		uint8_t attributes = memory_read(cpu, (uint16_t)(cpu->registers[PC] + 1));
+		uint8_t register_args = memory_read(cpu, (uint16_t)(cpu->registers[PC] + 2));
+		uint8_t register_args2 = memory_read(cpu, (uint16_t)(cpu->registers[PC] + 3));
+		uint8_t register_a = register_args >> 4;
+		uint8_t register_b = register_args & 0x0f;
+		uint8_t register_c = register_args2 & 0x0f;
+
+		int32_t val_b = cpu->registers[register_b];
+		int32_t val_c = cpu->registers[register_c];
+		int32_t carry_in = (cpu->flags[F_C] && check_attr_a1(attributes)) ? 1 : 0;
+
+		int32_t full_result = val_b + val_c + carry_in;
+		int16_t result = (int16_t)full_result;
+
+		cpu->registers[register_a] = result;
+
+		if (check_attr_a0(attributes)) {
+			cpu->flags[F_Z] = (result == 0);
+			cpu->flags[F_N] = (result < 0);
+			cpu->flags[F_C] = (full_result > 0xFFFF);
+
+			int16_t b16 = (int16_t)val_b;
+			int16_t c16 = (int16_t)val_c;
+			cpu->flags[F_V] = ((b16 < 0 && c16 < 0 && result >= 0) || (b16 >= 0 && c16 >= 0 && result < 0));
+		}
+		
+		instruction_size = 4;
+
+		break;
+	}
+	case 11: { // OP_ADD_IMM
+		uint8_t attributes = memory_read(cpu, (uint16_t)(cpu->registers[PC] + 1));
+		uint8_t register_args = memory_read(cpu, (uint16_t)(cpu->registers[PC] + 2));		
+		uint8_t register_a = register_args >> 4;
+		uint8_t register_b = register_args & 0x0f;
+
+		int16_t immediate = 0;
+
+		if (check_attr_a3(attributes)) { // Immediate byte attribute
+			if (check_attr_a2(attributes)) { // Immediate sign extension attribute
+				immediate = (int16_t)(int8_t)memory_read(cpu, (uint16_t)(cpu->registers[PC] + 3));
+			}
+			else {
+				immediate = (int16_t)(uint8_t)memory_read(cpu, (uint16_t)(cpu->registers[PC] + 3));
+			}
+
+			instruction_size = 4;
+		}
+		else { // Immediate is word
+			immediate = ((int16_t)memory_read(cpu, (uint16_t)(cpu->registers[PC] + 3)) & 0x00ff) | (((int16_t)memory_read(cpu, (uint16_t)(cpu->registers[PC] + 4)) & 0x00ff) << 8);
+			instruction_size = 5;
+		}
+
+		int32_t val_b = cpu->registers[register_b];
+		int32_t val_c = immediate;
+		int32_t carry_in = (cpu->flags[F_C] && check_attr_a1(attributes)) ? 1 : 0;
+
+		int32_t full_result = val_b + val_c + carry_in;
+		int16_t result = (int16_t)full_result;
+
+		cpu->registers[register_a] = result;
+
+		if (check_attr_a0(attributes)) {
+			cpu->flags[F_Z] = (result == 0);
+			cpu->flags[F_N] = (result < 0);
+			cpu->flags[F_C] = (full_result > 0xFFFF);
+
+			int16_t b16 = (int16_t)val_b;
+			int16_t c16 = (int16_t)val_c;
+			cpu->flags[F_V] = ((b16 < 0 && c16 < 0 && result >= 0) || (b16 >= 0 && c16 >= 0 && result < 0));
+		}
+
+		break;
+	}
+	case 12: { // OP_SUB
+		uint8_t attributes = memory_read(cpu, (uint16_t)(cpu->registers[PC] + 1));
+		uint8_t register_args = memory_read(cpu, (uint16_t)(cpu->registers[PC] + 2));
+		uint8_t register_args2 = memory_read(cpu, (uint16_t)(cpu->registers[PC] + 3));
+		uint8_t register_a = register_args >> 4;
+		uint8_t register_b = register_args & 0x0f;
+		uint8_t register_c = register_args2 & 0x0f;
+
+		int32_t val_b = cpu->registers[register_b];
+		int32_t val_c = cpu->registers[register_c];
+		int32_t carry_in = (cpu->flags[F_C] && check_attr_a1(attributes)) ? 1 : 0;
+
+		int32_t full_result = val_b - val_c - carry_in;
+		int16_t result = (int16_t)full_result;
+
+		cpu->registers[register_a] = result;
+
+		if (check_attr_a0(attributes)) {
+			cpu->flags[F_Z] = (result == 0);
+			cpu->flags[F_N] = (result < 0);
+			cpu->flags[F_C] = (full_result > 0xFFFF);
+
+			int16_t b16 = (int16_t)val_b;
+			int16_t c16 = (int16_t)val_c;
+			cpu->flags[F_V] = ((b16 != c16) && ((result ^ b16) & 0x8000));
+		}
+
+		instruction_size = 4;
+
+		break;
+	}
+	case 13: { // OP_SUB_IMM
+		uint8_t attributes = memory_read(cpu, (uint16_t)(cpu->registers[PC] + 1));
+		uint8_t register_args = memory_read(cpu, (uint16_t)(cpu->registers[PC] + 2));
+		uint8_t register_a = register_args >> 4;
+		uint8_t register_b = register_args & 0x0f;
+
+		int16_t immediate = 0;
+
+		if (check_attr_a3(attributes)) { // Immediate byte attribute
+			if (check_attr_a2(attributes)) { // Immediate sign extension attribute
+				immediate = (int16_t)(int8_t)memory_read(cpu, (uint16_t)(cpu->registers[PC] + 3));
+			}
+			else {
+				immediate = (int16_t)(uint8_t)memory_read(cpu, (uint16_t)(cpu->registers[PC] + 3));
+			}
+
+			instruction_size = 4;
+		}
+		else { // Immediate is word
+			immediate = ((int16_t)memory_read(cpu, (uint16_t)(cpu->registers[PC] + 3)) & 0x00ff) | (((int16_t)memory_read(cpu, (uint16_t)(cpu->registers[PC] + 4)) & 0x00ff) << 8);
+			instruction_size = 5;
+		}
+
+		int32_t val_b = cpu->registers[register_b];
+		int32_t val_c = immediate;
+		int32_t carry_in = (cpu->flags[F_C] && check_attr_a1(attributes)) ? 1 : 0;
+
+		int32_t full_result = val_b - val_c - carry_in;
+		int16_t result = (int16_t)full_result;
+
+		cpu->registers[register_a] = result;
+
+		if (check_attr_a0(attributes)) {
+			cpu->flags[F_Z] = (result == 0);
+			cpu->flags[F_N] = (result < 0);
+			cpu->flags[F_C] = (full_result > 0xFFFF);
+
+			int16_t b16 = (int16_t)val_b;
+			int16_t c16 = (int16_t)val_c;
+			cpu->flags[F_V] = ((b16 != c16) && ((result ^ b16) & 0x8000));
+		}
+
+		break;
+	}
+	case 14: { // OP_AND
+		uint8_t attributes = memory_read(cpu, (uint16_t)(cpu->registers[PC] + 1));
+		uint8_t register_args = memory_read(cpu, (uint16_t)(cpu->registers[PC] + 2));
+		uint8_t register_args2 = memory_read(cpu, (uint16_t)(cpu->registers[PC] + 3));
+		uint8_t register_a = register_args >> 4;
+		uint8_t register_b = register_args & 0x0f;
+		uint8_t register_c = register_args2 & 0x0f;
+
+		int32_t val_b = cpu->registers[register_b];
+		int32_t val_c = cpu->registers[register_c];
+
+		int32_t full_result = val_b & val_c;
+		int16_t result = (int16_t)full_result;
+
+		cpu->registers[register_a] = result;
+
+		if (check_attr_a0(attributes)) {
+			cpu->flags[F_Z] = (result == 0);
+			cpu->flags[F_N] = (result < 0);
+
+			cpu->flags[F_C] = 0;
+			cpu->flags[F_V] = 0;
+		}
+
+		instruction_size = 4;
+
+		break;
+	}
+	case 15: { // OP_AND_IMM
+		uint8_t attributes = memory_read(cpu, (uint16_t)(cpu->registers[PC] + 1));
+		uint8_t register_args = memory_read(cpu, (uint16_t)(cpu->registers[PC] + 2));
+		uint8_t register_a = register_args >> 4;
+		uint8_t register_b = register_args & 0x0f;
+
+		int16_t immediate = 0;
+
+		if (check_attr_a3(attributes)) { // Immediate byte attribute
+			if (check_attr_a2(attributes)) { // Immediate sign extension attribute
+				immediate = (int16_t)(int8_t)memory_read(cpu, (uint16_t)(cpu->registers[PC] + 3));
+			}
+			else {
+				immediate = (int16_t)(uint8_t)memory_read(cpu, (uint16_t)(cpu->registers[PC] + 3));
+			}
+
+			instruction_size = 4;
+		}
+		else { // Immediate is word
+			immediate = ((int16_t)memory_read(cpu, (uint16_t)(cpu->registers[PC] + 3)) & 0x00ff) | (((int16_t)memory_read(cpu, (uint16_t)(cpu->registers[PC] + 4)) & 0x00ff) << 8);
+			instruction_size = 5;
+		}
+
+		int32_t val_b = cpu->registers[register_b];
+		int32_t val_c = immediate;
+		int32_t full_result = val_b & val_c;
+		int16_t result = (int16_t)full_result;
+
+		cpu->registers[register_a] = result;
+
+		if (check_attr_a0(attributes)) {
+			cpu->flags[F_Z] = (result == 0);
+			cpu->flags[F_N] = (result < 0);
+
+			cpu->flags[F_C] = 0;
+			cpu->flags[F_V] = 0;
+		}
+
+		break;
+	}
+	case 16: { // OP_OR
+		uint8_t attributes = memory_read(cpu, (uint16_t)(cpu->registers[PC] + 1));
+		uint8_t register_args = memory_read(cpu, (uint16_t)(cpu->registers[PC] + 2));
+		uint8_t register_args2 = memory_read(cpu, (uint16_t)(cpu->registers[PC] + 3));
+		uint8_t register_a = register_args >> 4;
+		uint8_t register_b = register_args & 0x0f;
+		uint8_t register_c = register_args2 & 0x0f;
+
+		int32_t val_b = cpu->registers[register_b];
+		int32_t val_c = cpu->registers[register_c];
+
+		int32_t full_result = val_b | val_c;
+		int16_t result = (int16_t)full_result;
+
+		cpu->registers[register_a] = result;
+
+		if (check_attr_a0(attributes)) {
+			cpu->flags[F_Z] = (result == 0);
+			cpu->flags[F_N] = (result < 0);
+
+			cpu->flags[F_C] = 0;
+			cpu->flags[F_V] = 0;
+		}
+
+		instruction_size = 4;
+
+		break;
+	}
+	case 17: { // OP_OR_IMM
+		uint8_t attributes = memory_read(cpu, (uint16_t)(cpu->registers[PC] + 1));
+		uint8_t register_args = memory_read(cpu, (uint16_t)(cpu->registers[PC] + 2));
+		uint8_t register_a = register_args >> 4;
+		uint8_t register_b = register_args & 0x0f;
+
+		int16_t immediate = 0;
+
+		if (check_attr_a3(attributes)) { // Immediate byte attribute
+			if (check_attr_a2(attributes)) { // Immediate sign extension attribute
+				immediate = (int16_t)(int8_t)memory_read(cpu, (uint16_t)(cpu->registers[PC] + 3));
+			}
+			else {
+				immediate = (int16_t)(uint8_t)memory_read(cpu, (uint16_t)(cpu->registers[PC] + 3));
+			}
+
+			instruction_size = 4;
+		}
+		else { // Immediate is word
+			immediate = ((int16_t)memory_read(cpu, (uint16_t)(cpu->registers[PC] + 3)) & 0x00ff) | (((int16_t)memory_read(cpu, (uint16_t)(cpu->registers[PC] + 4)) & 0x00ff) << 8);
+			instruction_size = 5;
+		}
+
+		int32_t val_b = cpu->registers[register_b];
+		int32_t val_c = immediate;
+		int32_t full_result = val_b | val_c;
+		int16_t result = (int16_t)full_result;
+
+		cpu->registers[register_a] = result;
+
+		if (check_attr_a0(attributes)) {
+			cpu->flags[F_Z] = (result == 0);
+			cpu->flags[F_N] = (result < 0);
+
+			cpu->flags[F_C] = 0;
+			cpu->flags[F_V] = 0;
+		}
+
+		break;
+	}
+	case 18: { // OP_NOT
+		uint8_t attributes = memory_read(cpu, (uint16_t)(cpu->registers[PC] + 1));
+		uint8_t register_args = memory_read(cpu, (uint16_t)(cpu->registers[PC] + 2));
+		uint8_t register_a = register_args >> 4;
+		uint8_t register_b = register_args & 0x0f;
+
+
+		int32_t val_b = cpu->registers[register_b];
+		int32_t full_result = ~val_b;
+		int16_t result = (int16_t)full_result;
+
+		cpu->registers[register_a] = result;
+
+		if (check_attr_a0(attributes)) {
+			cpu->flags[F_Z] = (result == 0);
+			cpu->flags[F_N] = (result < 0);
+
+			cpu->flags[F_C] = 0;
+			cpu->flags[F_V] = 0;
+		}
+
+		instruction_size = 3;
+
+		break;
+	}
+	case 19: { // OP_LSR
+		uint8_t attributes = memory_read(cpu, (uint16_t)(cpu->registers[PC] + 1));
+		uint8_t register_args = memory_read(cpu, (uint16_t)(cpu->registers[PC] + 2));
+		uint8_t register_a = register_args & 0x0f;
+
+		uint8_t immediate = memory_read(cpu, (uint16_t)(cpu->registers[PC] + 3));
+
+		uint16_t val = cpu->registers[register_a];
+		int16_t result = 0;
+		uint8_t carry_out = 0;
+
+		if (immediate > 0 && immediate <= 16) {
+			carry_out = (val >> (immediate - 1)) & 1;
+			result = val >> immediate;
+		}
+		else if (immediate > 16) {
+			result = 0;
+			carry_out = 0;
+		}
+		else {
+			result = val;
+		}
+
+		cpu->registers[register_a] = result;
+
+		if (check_attr_a0(attributes)) {
+			cpu->flags[F_Z] = (result == 0);
+			cpu->flags[F_N] = (result < 0);
+
+			cpu->flags[F_C] = carry_out;
+			cpu->flags[F_V] = 0;
+		}
+
+		instruction_size = 4;
+
+		break;
+	}
+	case 20: { // OP_LSL
+		uint8_t attributes = memory_read(cpu, (uint16_t)(cpu->registers[PC] + 1));
+		uint8_t register_args = memory_read(cpu, (uint16_t)(cpu->registers[PC] + 2));
+		uint8_t register_a = register_args & 0x0f;
+
+		uint8_t immediate = memory_read(cpu, (uint16_t)(cpu->registers[PC] + 3));
+
+		uint16_t val = cpu->registers[register_a];
+		int16_t result = 0;
+		uint8_t carry_out = 0;
+
+		if (immediate > 0 && immediate <= 16) {
+			carry_out = (val << (immediate - 1)) & 1;
+			result = val >> immediate;
+		}
+		else if (immediate > 16) {
+			result = 0;
+			carry_out = 0;
+		}
+		else {
+			result = val;
+		}
+
+		cpu->registers[register_a] = result;
+
+		if (check_attr_a0(attributes)) {
+			cpu->flags[F_Z] = (result == 0);
+			cpu->flags[F_N] = (result < 0);
+
+			cpu->flags[F_C] = carry_out;
+			cpu->flags[F_V] = 0;
+		}
+
+		instruction_size = 4;
+
+		break;
+	}
+	case 21: { // OP_CMP
+		uint8_t attributes = memory_read(cpu, (uint16_t)(cpu->registers[PC] + 1));
+		uint8_t register_args = memory_read(cpu, (uint16_t)(cpu->registers[PC] + 2));
+		uint8_t register_a = register_args >> 4;
+		uint8_t register_b = register_args & 0x0f;
+
+
+		int32_t val_a = cpu->registers[register_a];
+		int32_t val_b = cpu->registers[register_b];
+
+		int32_t full_result = val_a - val_b;
+		int16_t result = (int16_t)full_result;
+
+		cpu->flags[F_Z] = (result == 0);
+		cpu->flags[F_N] = (result < 0);
+		cpu->flags[F_C] = (full_result > 0xFFFF);
+		int16_t a16 = (int16_t)val_a;
+		int16_t b16 = (int16_t)val_b;
+		cpu->flags[F_V] = ((a16 != b16) && ((result ^ a16) & 0x8000));
+
+		instruction_size = 2;
+
+		break;
+	}
+	case 22: { // OP_CMP_IMM
+		uint8_t attributes = memory_read(cpu, (uint16_t)(cpu->registers[PC] + 1));
+		uint8_t register_args = memory_read(cpu, (uint16_t)(cpu->registers[PC] + 2));
+		uint8_t register_a = register_args & 0x0f;
+
+		int16_t immediate = 0;
+
+		if (check_attr_a3(attributes)) { // Immediate byte attribute
+			if (check_attr_a2(attributes)) { // Immediate sign extension attribute
+				immediate = (int16_t)(int8_t)memory_read(cpu, (uint16_t)(cpu->registers[PC] + 3));
+			}
+			else {
+				immediate = (int16_t)(uint8_t)memory_read(cpu, (uint16_t)(cpu->registers[PC] + 3));
+			}
+
+			instruction_size = 4;
+		}
+		else { // Immediate is word
+			immediate = ((int16_t)memory_read(cpu, (uint16_t)(cpu->registers[PC] + 3)) & 0x00ff) | (((int16_t)memory_read(cpu, (uint16_t)(cpu->registers[PC] + 4)) & 0x00ff) << 8);
+			instruction_size = 5;
+		}
+
+		int32_t val_a = cpu->registers[register_a];
+		int32_t val_b = immediate;
+
+		int32_t full_result = val_a - val_b;
+		int16_t result = (int16_t)full_result;
+
+		cpu->flags[F_Z] = (result == 0);
+		cpu->flags[F_N] = (result < 0);
+		cpu->flags[F_C] = (full_result > 0xFFFF);
+		int16_t a16 = (int16_t)val_a;
+		int16_t b16 = (int16_t)val_b;
+		cpu->flags[F_V] = ((a16 != b16) && ((result ^ a16) & 0x8000));
 
 		break;
 	}
