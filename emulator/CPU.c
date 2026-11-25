@@ -17,6 +17,7 @@ void cpu_reset(CPU_state* cpu) {
 	cpu->interrupt_enabled = false;
 	cpu->kernel_mode = true;
 	cpu->mmu_enabled = false;
+	cpu->frozen = false;
 
 	cpu->registers[PC] = VAL_UPR_VIRT_WINDOW;
 }
@@ -60,6 +61,7 @@ void cpu_cycle(CPU_state* cpu) {
 	int8_t opcode = memory_read(cpu, cpu->registers[PC]);
 
 	int8_t instruction_size = 0;
+	bool increment_pc = true;
 
 	switch (opcode) {
 	case 0: { // OP_MOV_REG
@@ -710,9 +712,156 @@ void cpu_cycle(CPU_state* cpu) {
 
 		break;
 	}
+	case 31: { // OP_BRANCH
+		uint8_t register_args = memory_read(cpu, (uint16_t)(cpu->registers[PC] + 1));
+		uint8_t register_a = register_args & 0x0f;
+
+		cpu->registers[PC] = cpu->registers[register_a];
+		increment_pc = false;
+
+		break;
+	}
+	case 32: { // OP_BRANCH_IMM
+		uint8_t attributes = memory_read(cpu, (uint16_t)(cpu->registers[PC] + 1));
+
+		int16_t immediate = 0;
+
+		if (check_attr_a3(attributes)) { // Immediate byte attribute
+			if (check_attr_a2(attributes)) { // Immediate sign extension attribute
+				immediate = (int16_t)(int8_t)memory_read(cpu, (uint16_t)(cpu->registers[PC] + 2));
+			}
+			else {
+				immediate = (int16_t)(uint8_t)memory_read(cpu, (uint16_t)(cpu->registers[PC] + 2));
+			}
+			instruction_size = 3;
+		}
+		else { // Immediate is word
+			immediate = ((int16_t)memory_read(cpu, (uint16_t)(cpu->registers[PC] + 2)) & 0x00ff) | (((int16_t)memory_read(cpu, (uint16_t)(cpu->registers[PC] + 3)) & 0x00ff) << 8);
+			instruction_size = 4;
+		}
+
+		cpu->registers[PC] += immediate;
+		increment_pc = false;
+
+		break;
+	}
+	case 33: { // OP_BEQ_IMM
+		uint8_t attributes = memory_read(cpu, (uint16_t)(cpu->registers[PC] + 1));
+
+		int16_t immediate = 0;
+
+		if (check_attr_a3(attributes)) { // Immediate byte attribute
+			if (check_attr_a2(attributes)) { // Immediate sign extension attribute
+				immediate = (int16_t)(int8_t)memory_read(cpu, (uint16_t)(cpu->registers[PC] + 2));
+			}
+			else {
+				immediate = (int16_t)(uint8_t)memory_read(cpu, (uint16_t)(cpu->registers[PC] + 2));
+			}
+			instruction_size = 3;
+		}
+		else { // Immediate is word
+			immediate = ((int16_t)memory_read(cpu, (uint16_t)(cpu->registers[PC] + 2)) & 0x00ff) | (((int16_t)memory_read(cpu, (uint16_t)(cpu->registers[PC] + 3)) & 0x00ff) << 8);
+			instruction_size = 4;
+		}
+
+		if (cpu->flags[F_Z]) {
+			cpu->registers[PC] += immediate;
+			increment_pc = false;
+		}
+
+		break;
+	}
+	case 34: { // OP_BNE_IMM
+		uint8_t attributes = memory_read(cpu, (uint16_t)(cpu->registers[PC] + 1));
+
+		int16_t immediate = 0;
+
+		if (check_attr_a3(attributes)) { // Immediate byte attribute
+			if (check_attr_a2(attributes)) { // Immediate sign extension attribute
+				immediate = (int16_t)(int8_t)memory_read(cpu, (uint16_t)(cpu->registers[PC] + 2));
+			}
+			else {
+				immediate = (int16_t)(uint8_t)memory_read(cpu, (uint16_t)(cpu->registers[PC] + 2));
+			}
+			instruction_size = 3;
+		}
+		else { // Immediate is word
+			immediate = ((int16_t)memory_read(cpu, (uint16_t)(cpu->registers[PC] + 2)) & 0x00ff) | (((int16_t)memory_read(cpu, (uint16_t)(cpu->registers[PC] + 3)) & 0x00ff) << 8);
+			instruction_size = 4;
+		}
+
+		if (!cpu->flags[F_Z]) {
+			cpu->registers[PC] += immediate;
+			increment_pc = false;
+		}
+
+		break;
+	}
+	case 35: { // OP_BLT_IMM
+		uint8_t attributes = memory_read(cpu, (uint16_t)(cpu->registers[PC] + 1));
+
+		int16_t immediate = 0;
+
+		if (check_attr_a3(attributes)) { // Immediate byte attribute
+			if (check_attr_a2(attributes)) { // Immediate sign extension attribute
+				immediate = (int16_t)(int8_t)memory_read(cpu, (uint16_t)(cpu->registers[PC] + 2));
+			}
+			else {
+				immediate = (int16_t)(uint8_t)memory_read(cpu, (uint16_t)(cpu->registers[PC] + 2));
+			}
+			instruction_size = 3;
+		}
+		else { // Immediate is word
+			immediate = ((int16_t)memory_read(cpu, (uint16_t)(cpu->registers[PC] + 2)) & 0x00ff) | (((int16_t)memory_read(cpu, (uint16_t)(cpu->registers[PC] + 3)) & 0x00ff) << 8);
+			instruction_size = 4;
+		}
+
+		if (cpu->flags[F_N] != cpu->flags[F_V]) {
+			cpu->registers[PC] += immediate;
+			increment_pc = false;
+		}
+
+		break;
+	}
+	case 36: { // OP_BGT_IMM
+		uint8_t attributes = memory_read(cpu, (uint16_t)(cpu->registers[PC] + 1));
+
+		int16_t immediate = 0;
+
+		if (check_attr_a3(attributes)) { // Immediate byte attribute
+			if (check_attr_a2(attributes)) { // Immediate sign extension attribute
+				immediate = (int16_t)(int8_t)memory_read(cpu, (uint16_t)(cpu->registers[PC] + 2));
+			}
+			else {
+				immediate = (int16_t)(uint8_t)memory_read(cpu, (uint16_t)(cpu->registers[PC] + 2));
+			}
+			instruction_size = 3;
+		}
+		else { // Immediate is word
+			immediate = ((int16_t)memory_read(cpu, (uint16_t)(cpu->registers[PC] + 2)) & 0x00ff) | (((int16_t)memory_read(cpu, (uint16_t)(cpu->registers[PC] + 3)) & 0x00ff) << 8);
+			instruction_size = 4;
+		}
+
+		if (!cpu->flags[F_Z] && (cpu->flags[F_N] == cpu->flags[F_V])) {
+			cpu->registers[PC] += immediate;
+			increment_pc = false;
+		}
+
+		break;
+	}
+	case 42: { // OP_HLT
+		if (cpu->kernel_mode) {
+			cpu->frozen = true;
+		}
+		else {
+			// [TODO]: Throw an exception!!!!
+		}
+
+		break;
+	}
 	default:
 		break;
 	}
 
-	cpu->registers[PC] += instruction_size;
+	if (increment_pc) cpu->registers[PC] += instruction_size;
 }

@@ -14,6 +14,8 @@ typedef struct {
 	bool kernel_mode;
 	bool mmu_enabled;
 
+	bool frozen;
+
 	// Memory
 	int8_t RAM[0x2FFFF];
 	int8_t ROM[0x7FFF];
