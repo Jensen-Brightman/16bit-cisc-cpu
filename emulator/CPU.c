@@ -292,14 +292,14 @@ void cpu_cycle(CPU_state* cpu) {
 			int16_t c16 = (int16_t)val_c;
 			cpu->flags[F_V] = ((b16 < 0 && c16 < 0 && result >= 0) || (b16 >= 0 && c16 >= 0 && result < 0));
 		}
-		
+
 		instruction_size = 4;
 
 		break;
 	}
 	case 11: { // OP_ADD_IMM
 		uint8_t attributes = memory_read(cpu, (uint16_t)(cpu->registers[PC] + 1));
-		uint8_t register_args = memory_read(cpu, (uint16_t)(cpu->registers[PC] + 2));		
+		uint8_t register_args = memory_read(cpu, (uint16_t)(cpu->registers[PC] + 2));
 		uint8_t register_a = register_args >> 4;
 		uint8_t register_b = register_args & 0x0f;
 
@@ -846,6 +846,74 @@ void cpu_cycle(CPU_state* cpu) {
 			cpu->registers[PC] += immediate;
 			increment_pc = false;
 		}
+
+		break;
+	}
+	case 37: { // OP_PUSH
+		uint8_t register_args = memory_read(cpu, (uint16_t)(cpu->registers[PC] + 1));
+		uint8_t register_a = register_args & 0x0f;
+
+		cpu->registers[SP] -= 2;
+		uint16_t data_location = cpu->registers[SP];
+
+		memory_write(cpu, data_location, (uint8_t)(cpu->registers[register_a] & 0x00FF));
+		memory_write(cpu, (uint16_t)(data_location + 1), (uint8_t)((cpu->registers[register_a] >> 8) & 0x00FF));
+
+		instruction_size = 2;
+
+		break;
+	}
+	case 38: { // OP_POP
+		uint8_t register_args = memory_read(cpu, (uint16_t)(cpu->registers[PC] + 1));
+		uint8_t register_a = register_args & 0x0f;
+
+		uint16_t data_location = cpu->registers[SP];
+
+		uint16_t low_byte = (uint16_t)memory_read(cpu, data_location) & 0x00ff;
+		uint16_t high_byte = (uint16_t)memory_read(cpu, (uint16_t)(data_location + 1)) & 0x00ff;
+
+		cpu->registers[SP] += 2;
+		cpu->registers[register_a] = (int16_t)(low_byte | (high_byte << 8));
+
+		instruction_size = 2;
+		break;
+	}
+	case 39: { // OP_CALL
+		uint8_t register_args = memory_read(cpu, (uint16_t)(cpu->registers[PC] + 1));
+		uint8_t register_a = register_args & 0x0f;
+
+		cpu->registers[LR] = (uint16_t)(cpu->registers[PC] + 2);
+		cpu->registers[PC] = cpu->registers[register_a];
+
+		increment_pc = false;
+
+		break;
+	}
+	case 40: { // OP_CALL_IMM
+		uint8_t attributes = memory_read(cpu, (uint16_t)(cpu->registers[PC] + 1));
+
+		uint16_t immediate = 0;
+
+		if (check_attr_a3(attributes)) { // Immediate byte attribute
+			immediate = (int16_t)(uint8_t)memory_read(cpu, (uint16_t)(cpu->registers[PC] + 2));
+			instruction_size = 3;
+		}
+		else { // Immediate is word
+			immediate = ((int16_t)memory_read(cpu, (uint16_t)(cpu->registers[PC] + 2)) & 0x00ff) | (((int16_t)memory_read(cpu, (uint16_t)(cpu->registers[PC] + 3)) & 0x00ff) << 8);
+			instruction_size = 4;
+		}
+
+		cpu->registers[LR] = (uint16_t)(cpu->registers[PC] + instruction_size);
+		cpu->registers[PC] = immediate;
+
+		increment_pc = false;
+
+		break;
+	}
+	case 41: { // OP_RET
+		cpu->registers[PC] = cpu->registers[LR];
+
+		increment_pc = false;
 
 		break;
 	}
