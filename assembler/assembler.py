@@ -317,7 +317,8 @@ class Line:
                 for i in range(start_line.line_number + 1, target_line.line_number):
                     offset_calculated_bytes += lines[i].byte_size()
 
-                offset_calculated_bytes += Instruction.org
+                if not self.related_instr.uses_relative_referencing:
+                    offset_calculated_bytes += Instruction.org
 
                 if start_line.related_instr:
                     ln_base_size = start_line.related_instr.base_size
