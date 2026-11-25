@@ -231,6 +231,8 @@ class Line:
         return [Line(s, n) for n, s in enumerate(lns)]
 
     def check_for_references(self) -> None:
+        if self.get_immediate_index() == -1:
+            return
         reference = self.get_immediate_value()
         if (not reference) or Instruction.is_immediate(reference):
             return
@@ -495,6 +497,8 @@ if __name__ == "__main__":
         Instruction(39, "OP_CALL", "call", "r", [], 2),
         Instruction(40, "OP_CALL_IMM", "call", "i", [], 3),
         Instruction(41, "OP_RET", "ret", "", [], 1),
+
+        Instruction(42, "OP_HLT", "hlt", "", [], 1),
     ]
 
     parser = argparse.ArgumentParser(
