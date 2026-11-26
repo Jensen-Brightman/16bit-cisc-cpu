@@ -197,6 +197,8 @@ class Line:
         self.attributes: list[str] = None
         self.label_argument: str = None
         self.label_reference: Line = None
+        self.directive: str = None
+        self.directive_label_references: list[tuple[int, Line]] = []
         self.immediate_refernce_size = 1
 
         self.check_for_labels()
@@ -264,13 +266,33 @@ class Line:
         self.raw_bytes = bytearray()
 
         if directive == ".byte":
+            self.directive = directive
             for a in arg_str.split(","):
-                num = Instruction.immediate_to_int(a.strip())
+                value = a.strip()
+                if Instruction.is_immediate(value):
+                    num = Instruction.immediate_to_int(value)
+                else:
+                    target = Instruction.get_label_ln_with_name(value)
+                    if target is None:
+                        raise Exception("Label isn't defined")
+                    self.directive_label_references.append(
+                        (len(self.raw_bytes), target))
+                    num = 0
                 self.raw_bytes.extend(struct.pack(
                     "<B" if num >= 0 else "<b", num))
         elif directive == ".word":
+            self.directive = directive
             for a in arg_str.split(","):
-                num = Instruction.immediate_to_int(a.strip())
+                value = a.strip()
+                if Instruction.is_immediate(value):
+                    num = Instruction.immediate_to_int(value)
+                else:
+                    target = Instruction.get_label_ln_with_name(value)
+                    if target is None:
+                        raise Exception("Label isn't defined")
+                    self.directive_label_references.append(
+                        (len(self.raw_bytes), target))
+                    num = 0
                 self.raw_bytes.extend(struct.pack(
                     "<H" if num >= 0 else "<h", num))
         elif directive == ".org":
@@ -294,10 +316,23 @@ class Line:
         return self.label_reference
         # return Instruction.get_label_ln_with_name(self.get_immediate_value())
 
+    @staticmethod
+    def get_label_address(target_line: Line, lines: list[Line]) -> int:
+        return Instruction.org + sum(
+            line.byte_size() for line in lines[:target_line.line_number])
+
     def evaluate_label_arguments(self, lines: list[Line]) -> bool:
         """
         Returns if any changes where made to the lines refernce size.
         """
+        if self.directive_label_references:
+            for offset, target_line in self.directive_label_references:
+                address = Line.get_label_address(target_line, lines)
+                encoded = struct.pack(
+                    "<B" if self.directive == ".byte" else "<H", address)
+                self.raw_bytes[offset:offset + len(encoded)] = encoded
+            return False
+
         if not (self.related_instr and "i" in self.related_instr.arg_types):
             return        
 
@@ -331,8 +366,8 @@ class Line:
                 else:
                     offset_calculated_bytes += ln_base_size + 1
         else:
-            offset_calculated_bytes = Instruction.org + sum(
-                line.byte_size() for line in lines[:target_line.line_number])
+            offset_calculated_bytes = Line.get_label_address(
+                target_line, lines)
 
         self.args[self.get_immediate_index()] = str(offset_calculated_bytes)
         if self.immediate_refernce_size != 2:
